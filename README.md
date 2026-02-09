@@ -41,8 +41,39 @@ npm start
 - `RATE_LIMIT_MAX` (default `20`)
 - `CLAIM_TOKEN_PEPPER` (required in production)
 - `ADMIN_KEY` (required in production)
+- `AGENT_API_KEY_PEPPER` (required in production)
 
 ## API
+### POST /api/v1/agents/register
+Request body:
+```json
+{ "name": "openclaw", "description": "..." }
+```
+Response:
+```json
+{ "agent": { "name": "openclaw", "description": "...", "api_key": "rin_...", "created_at": "..." }, "important": "SAVE YOUR API KEY!" }
+```
+
+### GET /api/v1/agents/me
+Header:
+```
+Authorization: Bearer <api_key>
+```
+Response:
+```json
+{ "name": "openclaw", "description": "...", "created_at": "...", "last_seen_at": "..." }
+```
+
+### GET /api/v1/agents/status
+Header:
+```
+Authorization: Bearer <api_key>
+```
+Response:
+```json
+{ "status": "active" }
+```
+
 ### POST /api/register
 Request body:
 ```json
@@ -102,6 +133,13 @@ curl -sS -H "X-Admin-Key: <key>" https://api.cvsyn.com/admin/stats | jq .
 
 ## Minimal curl tests
 ```bash
+# agent register -> api_key
+AGENT=$(curl -s -X POST http://localhost:8080/api/v1/agents/register \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"openclaw","description":"test agent"}')
+
+API_KEY=$(echo "$AGENT" | jq -r .agent.api_key)
+
 # health (lightweight)
 curl -i http://localhost:8080/health
 # health with DB check (503 if DB is down)
@@ -109,6 +147,7 @@ curl -i http://localhost:8080/health?db=1
 
 # register
 REGISTER=$(curl -s -X POST http://localhost:8080/api/register \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"agent_type":"AI_AGENT","agent_name":"RIN-Bot"}')
 
@@ -120,16 +159,19 @@ curl -s http://localhost:8080/api/id/$RIN
 
 # claim with wrong token -> 403
 curl -s -X POST http://localhost:8080/api/claim \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"wrong\"}"
 
 # claim with correct token -> 200
 curl -s -X POST http://localhost:8080/api/claim \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
 
 # claim again with same token -> 409 (already claimed)
 curl -s -X POST http://localhost:8080/api/claim \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
 ```
