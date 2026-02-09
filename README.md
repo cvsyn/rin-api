@@ -72,6 +72,7 @@ Response:
 ```json
 { "status": "ok" }
 ```
+`GET /health?db=1` runs a DB check and returns `503` with `{ "status":"degraded", "db":"down" }` if the DB is unreachable.
 
 ## Deployment notes (Oracle Cloud A1 VM)
 - Run PostgreSQL and the API on the same VM.
@@ -81,6 +82,11 @@ Response:
 
 ## Minimal curl tests
 ```bash
+# health (lightweight)
+curl -i http://localhost:8080/health
+# health with DB check (503 if DB is down)
+curl -i http://localhost:8080/health?db=1
+
 # register
 REGISTER=$(curl -s -X POST http://localhost:8080/api/register \
   -H 'Content-Type: application/json' \
@@ -107,3 +113,10 @@ curl -s -X POST http://localhost:8080/api/claim \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
 ```
+
+## Daily stats
+Run manually:
+```bash
+npm run stats:daily
+```
+Intended to be scheduled daily via cron/systemd timer on the server.
