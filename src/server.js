@@ -56,7 +56,24 @@ async function createUniqueRin(agentType, agentName) {
   throw new Error('Failed to generate unique RIN');
 }
 
-fastify.get('/health', async () => ({ status: 'ok' }));
+fastify.get('/health', async (req, reply) => {
+  const dbParam = req.query?.db;
+  const checkDb =
+    dbParam === 1 ||
+    dbParam === true ||
+    String(dbParam).toLowerCase() === '1' ||
+    String(dbParam).toLowerCase() === 'true';
+
+  if (!checkDb) return { status: 'ok' };
+
+  try {
+    await query('SELECT 1');
+    return { status: 'ok', db: 'ok' };
+  } catch {
+    reply.code(503);
+    return { status: 'degraded', db: 'down' };
+  }
+});
 
 fastify.post('/api/register', async (req, reply) => {
   const ip = getClientIp(req);
