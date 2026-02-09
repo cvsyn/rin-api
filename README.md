@@ -40,6 +40,7 @@ npm start
 - `RATE_LIMIT_WINDOW_MS` (default `60000`)
 - `RATE_LIMIT_MAX` (default `20`)
 - `CLAIM_TOKEN_PEPPER` (required in production)
+- `ADMIN_KEY` (required in production)
 
 ## API
 ### POST /api/register
@@ -73,6 +74,25 @@ Response:
 { "status": "ok" }
 ```
 `GET /health?db=1` runs a DB check and returns `503` with `{ "status":"degraded", "db":"down" }` if the DB is unreachable.
+
+### GET /admin/stats
+Header:
+```
+X-Admin-Key: <ADMIN_KEY>
+```
+Response:
+```json
+{
+  "range_days": 30,
+  "daily": [{ "day": "YYYY-MM-DD", "register_count": 0, "claim_count": 0 }],
+  "totals": { "register_count": 0, "claim_count": 0 }
+}
+```
+
+Example:
+```bash
+curl -sS -H "X-Admin-Key: <key>" https://api.cvsyn.com/admin/stats | jq .
+```
 
 ## Deployment notes (Oracle Cloud A1 VM)
 - Run PostgreSQL and the API on the same VM.

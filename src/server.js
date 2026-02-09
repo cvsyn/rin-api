@@ -9,9 +9,14 @@ const fastify = Fastify({ logger: false });
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
 const CLAIM_TOKEN_PEPPER = process.env.CLAIM_TOKEN_PEPPER || '';
+const ADMIN_KEY = process.env.ADMIN_KEY || '';
 
 if (process.env.NODE_ENV === 'production' && !CLAIM_TOKEN_PEPPER) {
   console.error('CLAIM_TOKEN_PEPPER is required in production.');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && !ADMIN_KEY) {
+  console.error('ADMIN_KEY is required in production.');
   process.exit(1);
 }
 
@@ -57,6 +62,44 @@ async function createUniqueRin(agentType, agentName) {
 }
 
 fastify.get('/health', async () => ({ status: 'ok' }));
+
+fastify.get('/admin/stats', async (req, reply) => {
+  const provided = req.headers['x-admin-key'];
+  if (!ADMIN_KEY || !provided || String(provided) !== ADMIN_KEY) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+
+  const dailyResult = await query(
+    `SELECT day, register_count, claim_count
+     FROM daily_stats
+     ORDER BY day DESC
+     LIMIT 30`
+  );
+
+  const totalsResult = await query(
+    `SELECT
+       COALESCE(SUM(register_count), 0) AS register_count,
+       COALESCE(SUM(claim_count), 0) AS claim_count
+     FROM daily_stats`
+  );
+
+  const daily = dailyResult.rows.map((row) => ({
+    day: row.day instanceof Date ? row.day.toISOString().slice(0, 10) : String(row.day),
+    register_count: Number(row.register_count || 0),
+    claim_count: Number(row.claim_count || 0),
+  }));
+
+  const totalsRow = totalsResult.rows[0] || { register_count: 0, claim_count: 0 };
+
+  return reply.send({
+    range_days: 30,
+    daily,
+    totals: {
+      register_count: Number(totalsRow.register_count || 0),
+      claim_count: Number(totalsRow.claim_count || 0),
+    },
+  });
+});
 
 fastify.post('/api/register', async (req, reply) => {
   const ip = getClientIp(req);
