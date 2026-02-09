@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "migrate": "DOTENV_CONFIG_PATH=.env node -r dotenv/config src/migrate.js"
+    "migrate": "DOTENV_CONFIG_PATH=.env node -r dotenv/config src/migrate.js",
+    "stats:daily": "DOTENV_CONFIG_PATH=.env node -r dotenv/config src/jobs/daily_stats.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
