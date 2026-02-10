@@ -1,6 +1,6 @@
 # RIN API (Node.js + PostgreSQL)
 
-A minimal identity service for AI/agent IDs (RIN) with agent API key auth for write/admin endpoints.
+A minimal identity service for AI/agent IDs (RIN). No auth, no frontend.
 
 ## Requirements
 - Node.js 20+
@@ -44,11 +44,6 @@ npm start
 - `AGENT_API_KEY_PEPPER` (required in production)
 
 ## API
-### Agent auth (Moltbook-style)
-1) Register an agent to receive an API key (returned once).
-2) Use `Authorization: Bearer rin_...` for write/admin endpoints.
-3) Store the key securely and rotate/revoke when needed.
-
 ### POST /api/v1/agents/register
 Request body:
 ```json
@@ -66,27 +61,7 @@ Authorization: Bearer <api_key>
 ```
 Response:
 ```json
-{ "name": "openclaw", "description": "...", "created_at": "...", "last_seen_at": "...", "revoked_at": null }
-```
-
-### POST /api/v1/agents/rotate-key
-Header:
-```
-Authorization: Bearer <api_key>
-```
-Response:
-```json
-{ "api_key": "rin_...", "rotated": true, "important": "SAVE YOUR API KEY!" }
-```
-
-### POST /api/v1/agents/revoke
-Header:
-```
-Authorization: Bearer <api_key>
-```
-Response:
-```json
-{ "revoked": true }
+{ "name": "openclaw", "description": "...", "created_at": "...", "last_seen_at": "..." }
 ```
 
 ### GET /api/v1/agents/status
@@ -104,10 +79,6 @@ Request body:
 ```json
 { "agent_type": "AI_AGENT", "agent_name": "Optional Name" }
 ```
-Header:
-```
-Authorization: Bearer <api_key>
-```
 Response:
 ```json
 { "rin": "X7PK9T", "agent_type": "AI_AGENT", "agent_name": "Optional Name", "status": "UNCLAIMED", "issued_at": "...", "claim_token": "..." }
@@ -117,10 +88,6 @@ Response:
 Request body:
 ```json
 { "rin": "X7PK9T", "claimed_by": "Acme Labs", "claim_token": "<token>" }
-```
-Header:
-```
-Authorization: Bearer <api_key>
 ```
 Response:
 ```json
@@ -143,7 +110,6 @@ Response:
 Header:
 ```
 X-Admin-Key: <ADMIN_KEY>
-Authorization: Bearer <api_key>
 ```
 Response:
 ```json
@@ -156,7 +122,7 @@ Response:
 
 Example:
 ```bash
-curl -sS -H "X-Admin-Key: <key>" -H "Authorization: Bearer <api_key>" https://api.cvsyn.com/admin/stats | jq .
+curl -sS -H "X-Admin-Key: <key>" https://api.cvsyn.com/admin/stats | jq .
 ```
 
 ## Deployment notes (Oracle Cloud A1 VM)
@@ -193,42 +159,18 @@ curl -s http://localhost:8080/api/id/$RIN
 
 # claim with wrong token -> 403
 curl -s -X POST http://localhost:8080/api/claim \
-  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"wrong\"}"
 
 # claim with correct token -> 200
 curl -s -X POST http://localhost:8080/api/claim \
-  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
 
 # claim again with same token -> 409 (already claimed)
 curl -s -X POST http://localhost:8080/api/claim \
-  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
-
-# rotate -> old key unauthorized, new key ok
-ROTATE=$(curl -s -X POST http://localhost:8080/api/v1/agents/rotate-key \
-  -H "Authorization: Bearer $API_KEY")
-NEW_KEY=$(echo "$ROTATE" | jq -r .api_key)
-curl -s -o /dev/null -w "%{http_code}\\n" -X POST http://localhost:8080/api/register \
-  -H "Authorization: Bearer $API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_type":"AI_AGENT"}'
-curl -s -o /dev/null -w "%{http_code}\\n" -X POST http://localhost:8080/api/register \
-  -H "Authorization: Bearer $NEW_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_type":"AI_AGENT"}'
-
-# revoke -> unauthorized afterwards
-curl -s -X POST http://localhost:8080/api/v1/agents/revoke \
-  -H "Authorization: Bearer $NEW_KEY"
-curl -s -o /dev/null -w "%{http_code}\\n" -X POST http://localhost:8080/api/register \
-  -H "Authorization: Bearer $NEW_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_type":"AI_AGENT"}'
 ```
 
 ## Daily stats
@@ -237,11 +179,3 @@ Run manually:
 npm run stats:daily
 ```
 Intended to be scheduled daily via cron/systemd timer on the server.
-
-## CLI usage
-Store credentials at `~/.config/rin/credentials.json` (0600). Never share API keys.
-```bash
-node rin-cli.mjs me
-node rin-cli.mjs rotate
-node rin-cli.mjs revoke
-```

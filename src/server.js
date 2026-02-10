@@ -314,14 +314,6 @@ fastify.post('/api/register', async (req, reply) => {
 });
 
 fastify.post('/api/claim', async (req, reply) => {
-  const agent = await requireAgentAuth(req, reply);
-  if (!agent) return;
-
-  const agentRl = isAgentAllowed(agent.name);
-  if (!agentRl.allowed) {
-    return reply.code(429).send({ error: 'Too many requests' });
-  }
-
   const body = req.body || {};
   const rin = safeTrim(body.rin, 16);
   const claimedBy = safeTrim(body.claimed_by, 160);
