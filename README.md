@@ -159,19 +159,16 @@ curl -s http://localhost:8080/api/id/$RIN
 
 # claim with wrong token -> 403
 curl -s -X POST http://localhost:8080/api/claim \
-  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"wrong\"}"
 
 # claim with correct token -> 200
 curl -s -X POST http://localhost:8080/api/claim \
-  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
 
 # claim again with same token -> 409 (already claimed)
 curl -s -X POST http://localhost:8080/api/claim \
-  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
 ```
