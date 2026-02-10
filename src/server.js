@@ -60,7 +60,7 @@ function isAgentAllowed(agentId) {
 }
 
 function hashAgentApiKey(apiKey) {
-  return crypto.createHash('sha256').update(`${apiKey}${AGENT_API_KEY_PEPPER}`).digest('hex');
+  return crypto.createHmac('sha256', AGENT_API_KEY_PEPPER).update(apiKey).digest('hex');
 }
 
 async function requireAgentAuth(req, reply) {
@@ -71,16 +71,16 @@ async function requireAgentAuth(req, reply) {
   }
 
   const apiKey = auth.slice('Bearer '.length).trim();
-  if (!apiKey) {
+  if (!apiKey || !apiKey.startsWith('rin_')) {
     reply.code(401).send({ error: 'Unauthorized' });
     return null;
   }
 
   const apiKeyHash = hashAgentApiKey(apiKey);
   const result = await query(
-    `SELECT id, name, description, created_at, last_seen_at
+    `SELECT name, description, created_at, last_seen_at, revoked_at
      FROM agents
-     WHERE api_key_hash = $1`,
+     WHERE api_key_hash = $1 AND revoked_at IS NULL`,
     [apiKeyHash]
   );
 
@@ -90,7 +90,7 @@ async function requireAgentAuth(req, reply) {
   }
 
   const agent = result.rows[0];
-  await query(`UPDATE agents SET last_seen_at = NOW() WHERE id = $1`, [agent.id]);
+  await query(`UPDATE agents SET last_seen_at = NOW() WHERE name = $1`, [agent.name]);
   req.agent = agent;
   return agent;
 }
@@ -193,7 +193,40 @@ fastify.get('/api/v1/agents/me', async (req, reply) => {
     description: agent.description || undefined,
     created_at: agent.created_at,
     last_seen_at: agent.last_seen_at,
+    revoked_at: agent.revoked_at,
   });
+});
+
+fastify.post('/api/v1/agents/rotate-key', async (req, reply) => {
+  const agent = await requireAgentAuth(req, reply);
+  if (!agent) return;
+
+  const apiKey = `rin_${crypto.randomBytes(32).toString('base64url')}`;
+  const apiKeyHash = hashAgentApiKey(apiKey);
+
+  await query(
+    `UPDATE agents
+     SET api_key_hash = $1,
+         revoked_at = NULL
+     WHERE name = $2`,
+    [apiKeyHash, agent.name]
+  );
+
+  return reply.send({ api_key: apiKey, rotated: true, important: 'SAVE YOUR API KEY!' });
+});
+
+fastify.post('/api/v1/agents/revoke', async (req, reply) => {
+  const agent = await requireAgentAuth(req, reply);
+  if (!agent) return;
+
+  await query(
+    `UPDATE agents
+     SET revoked_at = NOW()
+     WHERE name = $1`,
+    [agent.name]
+  );
+
+  return reply.send({ revoked: true });
 });
 
 fastify.get('/api/v1/agents/status', async (req, reply) => {
@@ -248,7 +281,7 @@ fastify.post('/api/register', async (req, reply) => {
   const agent = await requireAgentAuth(req, reply);
   if (!agent) return;
 
-  const agentRl = isAgentAllowed(agent.id);
+  const agentRl = isAgentAllowed(agent.name);
   if (!agentRl.allowed) {
     return reply.code(429).send({ error: 'Too many requests' });
   }
