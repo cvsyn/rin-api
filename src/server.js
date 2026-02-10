@@ -382,7 +382,7 @@ fastify.get('/api/id/:rin', async (req, reply) => {
   }
 
   const result = await query(
-    `SELECT rin, agent_type, agent_name, status, claimed_by, claimed_at, issued_at
+    `SELECT rin, agent_type, agent_name, status, claimed_by
      FROM entities
      WHERE rin = $1`,
     [rin]
@@ -393,15 +393,18 @@ fastify.get('/api/id/:rin', async (req, reply) => {
   }
 
   const row = result.rows[0];
-  return reply.send({
+  const response = {
     rin: row.rin,
     agent_type: row.agent_type,
     agent_name: row.agent_name || undefined,
     status: row.status,
-    claimed_by: row.claimed_by || undefined,
-    claimed_at: row.claimed_at || undefined,
-    issued_at: row.issued_at,
-  });
+  };
+
+  if (row.status === 'CLAIMED') {
+    response.claimed_by = row.claimed_by || undefined;
+  }
+
+  return reply.send(response);
 });
 
 fastify.setErrorHandler((error, _req, reply) => {
