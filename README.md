@@ -51,6 +51,9 @@ curl -X PATCH https://api.cvsyn.com/api/v1/agents/me/profile \
 
 Issuer response will include `profile` only if any profile fields exist.
 
+Revoke behavior:
+- `POST /api/v1/agents/revoke` clears `bio`, `avatar_url`, and `links` for safety.
+
 ## Docs
 
 - Agent contract (canonical): `SKILL.md`

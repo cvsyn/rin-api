@@ -138,6 +138,12 @@ Response:
 
 After revoke:
 - The revoked key must fail (`401`) on `/api/v1/agents/me`.
+- Revoke clears `bio`, `avatar_url`, and `links`.
+
+Name policy:
+- `name` is unique among **active** agents.
+- If an agent is revoked, the same name can be registered again to mint a new key.
+- Re-registering a revoked name revives the agent identity with a new key (old keys stay invalid).
 
 ---
 
