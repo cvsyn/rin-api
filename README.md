@@ -1,193 +1,129 @@
 # RIN API
 
-Version: 1.0.0  
-Spec: Stable
+RIN is a minimal, security-first identity registry for agents (Moltbook-style).  
+It issues a stable identifier (**RIN**) for an agent and supports a public **claim** flow.
 
-RIN is an issuer-backed identifier system for AI agents.
+- **Website:** https://www.cvsyn.com  
+- **API base:** `https://api.cvsyn.com`
 
-Each OpenClaw session (or any AI process) is treated as an **Agent**.
-Agents authenticate using an **Agent API Key**, and can:
+## What this repo contains
 
-- Register RINs
-- Rotate/revoke their API keys
-- Issue claimable identifiers
-- Verify ownership state publicly
+This repository (`rin-api`) serves the HTTP API.
 
-This repository contains the reference implementation of the RIN API.
+Related:
+- `rin-web` hosts the website and the **agent-facing** `skill.md` (copy should stay consistent with this repo’s public contract).
 
----
+## Quick start (local)
 
-## 🔐 Security Model
+### Requirements
+- Node.js (recommended: Node 20+)
+- Postgres
+- `bash`, `curl`, `jq` (for the E2E script)
 
-- Every write operation requires `Authorization: Bearer <api_key>`.
-- `api_key` is returned **only once** at registration.
-- `claim_token` is returned at RIN issuance and must never be logged or printed.
-- Public issuer endpoint **never exposes sensitive fields**.
-
-## 🔒 Secret Handling Rules
-
-The following values must never be logged, printed, or returned by public endpoints:
-
-- `api_key`
-- `claim_token`
-- internal hash values
-- `revoked_at`
-- `claimed_at`
-
----
-
-# 🚀 Quick Start
-
-## 1️⃣ Register an Agent
+### Configure
+Create `.env` (example keys only):
 
 ```bash
-curl -X POST https://api.cvsyn.com/api/v1/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"my-agent"}'
+NODE_ENV=development
+DATABASE_URL=postgres://...
+ADMIN_KEY=...                 # admin-only endpoints
+AGENT_API_KEY_PEPPER=...      # pepper used when hashing agent api keys
+CLAIM_TOKEN_PEPPER=...        # pepper used when hashing claim tokens
+```
 
-Response:
+### Install, migrate, run
+```bash
+npm install
+npm run migrate
+node src/server.js
+```
 
+Health checks:
+```bash
+curl -sS http://localhost:8080/health | jq .
+curl -sS http://localhost:8080/health?db=1 | jq .
+```
+
+## API overview
+
+### Public (no auth)
+- `GET /health`
+- `GET /health?db=1`
+- `GET /api/id/:rin`
+- `POST /api/claim`
+
+### Agent-auth (requires `Authorization: Bearer <agent_api_key>`)
+- `POST /api/v1/agents/register`
+- `GET /api/v1/agents/me`
+- `POST /api/v1/agents/rotate-key`
+- `POST /api/v1/agents/revoke`
+- `POST /api/register` (issue a RIN)
+
+## Security contract (important)
+
+### Never log or expose secrets
+- **Agent API keys** and **claim tokens** are secrets.
+- `GET /api/id/:rin` must never expose:
+  - `api_key`, key hashes, `claim_token`, `issued_at`, or any other secret/internal fields.
+
+### Issuer response shape (public lookup)
+`GET /api/id/:rin` returns **only**:
+
+- `rin`
+- `agent_type`
+- `agent_name`
+- `status`
+- `claimed_by` *(only when `status` is `CLAIMED`)*
+
+Example (UNCLAIMED):
+```json
 {
-  "agent": {
-    "name": "my-agent",
-    "api_key": "rin_xxx",
-    "created_at": "..."
-  },
-  "important": "SAVE YOUR API KEY!"
-}
-
-⚠️ api_key will not be shown again. Store it securely.
-
-⸻
-
-2️⃣ Verify Agent
-
-curl https://api.cvsyn.com/api/v1/agents/me \
-  -H "Authorization: Bearer rin_xxx"
-
-
-⸻
-
-3️⃣ Issue a RIN
-
-curl -X POST https://api.cvsyn.com/api/register \
-  -H "Authorization: Bearer rin_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_type":"openclaw","agent_name":"prod"}'
-
-Response:
-
-{
-  "rin": "ABC1234",
-  "agent_type": "openclaw",
-  "agent_name": "prod",
-  "status": "UNCLAIMED",
-  "issued_at": "...",
-  "claim_token": "secret-token"
-}
-
-⚠️ claim_token must never be logged or printed.
-
-⸻
-
-4️⃣ Public Lookup (Issuer Endpoint)
-
-curl https://api.cvsyn.com/api/id/ABC1234
-
-UNCLAIMED response:
-
-{
-  "rin": "ABC1234",
+  "rin": "2P232FS",
   "agent_type": "openclaw",
   "agent_name": "prod",
   "status": "UNCLAIMED"
 }
+```
 
-CLAIMED response:
-
+Example (CLAIMED):
+```json
 {
-  "rin": "ABC1234",
+  "rin": "2P232FS",
   "agent_type": "openclaw",
   "agent_name": "prod",
   "status": "CLAIMED",
   "claimed_by": "minijun"
 }
+```
 
-Public endpoint never exposes api_key, claim_token, or internal timestamps.
+## End-to-end test script
 
-⸻
+Add the script below to your repo as `scripts/rin-e2e-test.sh` and run:
 
-5️⃣ Claim Ownership
-
-curl -X POST https://api.cvsyn.com/api/claim \
-  -H "Content-Type: application/json" \
-  -d '{"rin":"ABC1234","claimed_by":"minijun","claim_token":"secret-token"}'
-
-
-⸻
-
-🔄 API Key Lifecycle
-
-Rotate Key
-
-curl -X POST https://api.cvsyn.com/api/v1/agents/rotate-key \
-  -H "Authorization: Bearer rin_old"
-
-Lifecycle Guarantee:
-- old key becomes immediately invalid (401)
-- new key becomes immediately valid (200)
-- rotation is atomic
-
-⸻
-
-Revoke Key
-
-curl -X POST https://api.cvsyn.com/api/v1/agents/revoke \
-  -H "Authorization: Bearer rin_current"
-
-After revoke:
-	•	key → 401
-
-⸻
-
-🧪 End-to-End Verification
-
-This repository includes a full lifecycle verification script:
-
-scripts/rin-e2e-test.sh
-
-Requirements
-	•	bash
-	•	curl
-	•	jq
-
-Run
-
+```bash
 chmod +x scripts/rin-e2e-test.sh
 ./scripts/rin-e2e-test.sh
+```
 
-The script validates:
-	•	Agent onboarding
-	•	Write authentication enforcement
-	•	Claim flow correctness
-	•	Public issuer field restrictions
-	•	Rotate/revoke lifecycle
-	•	Key invalidation guarantees
+This script:
+- Does **not** print `api_key` or `claim_token`.
+- Validates A/B/C/D flows:
+  - agent onboarding
+  - write protection
+  - claim flow
+  - issuer field constraints
+  - rotate/revoke lifecycle
 
-Sensitive keys/tokens are never printed.
+See `SKILL.md` for the public/agent-facing contract.
 
-⸻
+## Deploy notes (pm2)
 
-🏛 Design Principles
-	•	Minimal surface area
-	•	Explicit lifecycle guarantees
-	•	Strict public field policy
-	•	Stateless verification model
-	•	Agent identity separation
-	•	No secret leakage in issuer responses
-
-⸻
-
-📜 License
-
-MIT
+Typical server refresh (example):
+```bash
+cd /home/ubuntu/airin/api
+git pull
+npm install
+npm run migrate
+pm2 restart rin-api --update-env
+pm2 logs rin-api --lines 80
+```
