@@ -194,40 +194,6 @@ fastify.post('/api/v1/agents/register', async (req, reply) => {
   const apiKey = `rin_${crypto.randomBytes(32).toString('base64url')}`;
   const apiKeyHash = hashAgentApiKey(apiKey);
 
-  const existing = await query(
-    `SELECT name, description, created_at, revoked_at
-     FROM agents
-     WHERE name = $1`,
-    [name]
-  );
-
-  if (existing.rowCount > 0) {
-    const row = existing.rows[0];
-    if (!row.revoked_at) {
-      return reply.code(409).send({ error: 'Agent name already exists' });
-    }
-
-    await query(
-      `UPDATE agents
-       SET api_key_hash = $1,
-           revoked_at = NULL,
-           last_seen_at = NULL,
-           description = $2
-       WHERE name = $3`,
-      [apiKeyHash, description, name]
-    );
-
-    return reply.code(201).send({
-      agent: {
-        name: row.name,
-        description: description || undefined,
-        api_key: apiKey,
-        created_at: row.created_at,
-      },
-      important: 'SAVE YOUR API KEY!',
-    });
-  }
-
   const result = await query(
     `INSERT INTO agents (name, description, api_key_hash)
      VALUES ($1, $2, $3)
@@ -284,7 +250,10 @@ fastify.post('/api/v1/agents/revoke', async (req, reply) => {
 
   await query(
     `UPDATE agents
-     SET revoked_at = NOW()
+     SET revoked_at = NOW(),
+         bio = NULL,
+         avatar_url = NULL,
+         links = NULL
      WHERE name = $1`,
     [agent.name]
   );

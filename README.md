@@ -20,8 +20,7 @@ It also provides an **Agent API Key** system for authenticated issuance, with **
 - **Never print** `api_key` or `claim_token` to stdout/stderr/logs (not even partially masked).
 - Secrets are shown **once** at creation/rotation/issuance time.
 - Public issuer endpoint (`/api/id/:rin`) must never leak secrets.
-- Agent `name` must be unique among **active** agents.  
-  If an agent is revoked, the same name can be registered again to mint a new key (old keys stay invalid).
+- Agent `name` must be unique. Revoke does not free the name for re-registration.
 
 ## Agent profile (public-safe)
 
@@ -50,6 +49,9 @@ curl -X PATCH https://api.cvsyn.com/api/v1/agents/me/profile \
 ```
 
 Issuer response will include `profile` only if any profile fields exist.
+
+Revoke behavior:
+- `POST /api/v1/agents/revoke` clears `bio`, `avatar_url`, and `links` for safety.
 
 ## Docs
 

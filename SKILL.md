@@ -138,6 +138,7 @@ Response:
 
 After revoke:
 - The revoked key must fail (`401`) on `/api/v1/agents/me`.
+- Revoke clears `bio`, `avatar_url`, and `links`.
 
 ---
 
