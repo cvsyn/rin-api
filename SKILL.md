@@ -1,172 +1,196 @@
-# RIN — Skill / API Contract (rin-api)
+# RIN API — Skill (Agent Contract)
 
-This document describes the public contract for the **RIN API**.
+This document is the **canonical contract** for agents/tools that integrate with **RIN API**.
+If something conflicts with other docs, **this file wins**.
 
-- **API base:** `https://api.cvsyn.com`
-- **Purpose:** minimal identity registry for agents + human claim flow (security-first).
+> **Hard rule:** Never print `api_key` or `claim_token` (not even partially masked).  
+> Use them only in memory/variables/files. Treat logs as a leak vector.
 
 ---
 
-## Endpoints
+## Base URL
 
-### Public (no auth required)
+All requests MUST go to:
 
-- `GET /health`
-- `GET /health?db=1`
-- `GET /api/id/:rin`
-- `POST /api/claim`
+- `https://api.cvsyn.com`
 
-### Agent-auth (requires `Authorization: Bearer <agent_api_key>`)
-
-- `POST /api/v1/agents/register`
-- `GET /api/v1/agents/me`
-- `POST /api/v1/agents/rotate-key`
-- `POST /api/v1/agents/revoke`
-- `POST /api/register` *(issue a RIN + claim token)*
+Do **not** call IPs, alternate domains, localhost, proxies, or mirrors.
 
 ---
 
 ## Authentication
 
-Agent-auth endpoints require:
+Write endpoints require an **Agent API Key**:
 
-```
-Authorization: Bearer rin_...
-```
+- Header: `Authorization: Bearer <api_key>`
 
-Only send this header to **`https://api.cvsyn.com`**.
+Rules:
+
+- Missing/invalid key → `401 Unauthorized`
+- Rotated key (old key) → `401 Unauthorized`
+- Revoked key → `401 Unauthorized`
 
 ---
 
-## Response contracts
+## Endpoints
 
-### 1) Register an agent key
+### 1) Create agent key (public)
 
-`POST /api/v1/agents/register`
+#### `POST /api/v1/agents/register`
 
-Body:
+Request:
 ```json
-{ "name": "my-agent", "description": "optional" }
+{ "name": "string", "description": "string (optional)" }
 ```
 
-Response (secret returned once):
+Response (**api_key is shown once**):
 ```json
 {
   "agent": {
-    "name": "my-agent",
-    "description": "optional",
-    "api_key": "rin_...",
-    "created_at": "..."
+    "name": "string",
+    "description": "string (optional)",
+    "api_key": "string",
+    "created_at": "ISO8601"
   },
   "important": "SAVE YOUR API KEY!"
 }
 ```
 
-### 2) Agent “me”
+✅ **Parsing requirement (critical):**
+- The key is at **`.agent.api_key`** (NOT at `.api_key`).
 
-`GET /api/v1/agents/me` (auth required)
+---
+
+### 2) Validate key (auth)
+
+#### `GET /api/v1/agents/me`
+
+Auth required.
 
 Response:
 ```json
 {
-  "name": "my-agent",
-  "description": "optional",
-  "created_at": "...",
-  "last_seen_at": "...",
-  "revoked_at": null
+  "name": "string",
+  "description": "string (optional)",
+  "created_at": "ISO8601",
+  "last_seen_at": "ISO8601 (optional)",
+  "revoked_at": "ISO8601 (optional)"
 }
 ```
 
-### 3) Rotate agent key
+---
 
-`POST /api/v1/agents/rotate-key` (auth required)
+### 3) Rotate key (auth)
 
-Response:
+#### `POST /api/v1/agents/rotate-key`
+
+Auth required.
+
+Response (**new api_key is shown once**):
 ```json
 {
-  "api_key": "rin_...NEW...",
+  "api_key": "string",
   "rotated": true,
   "important": "SAVE YOUR API KEY!"
 }
 ```
 
-Expected behavior:
-- old key → **401**
-- new key → **200** (for `/api/v1/agents/me`)
+✅ Parsing requirement:
+- The new key is at **`.api_key`**
+- `rotated` must be `true`
 
-### 4) Revoke agent key
+Lifecycle guarantee:
+- Old key becomes invalid immediately (`401`)
+- New key works (`200` on `/api/v1/agents/me`)
 
-`POST /api/v1/agents/revoke` (auth required)
+---
+
+### 4) Revoke key (auth)
+
+#### `POST /api/v1/agents/revoke`
+
+Auth required.
 
 Response:
 ```json
 { "revoked": true }
 ```
 
-Expected behavior:
-- revoked key → **401** (for `/api/v1/agents/me`)
+After revoke:
+- The revoked key must fail (`401`) on `/api/v1/agents/me`.
 
 ---
 
-## RIN issuance + claim
+## RIN issuance & claiming
 
-### 5) Issue a RIN (write-protected)
+### 5) Issue RIN (auth)
 
-`POST /api/register` (auth required)
+#### `POST /api/register`
 
-Body:
+Auth required.
+
+Request:
 ```json
-{ "agent_type": "openclaw", "agent_name": "prod" }
+{ "agent_type": "string", "agent_name": "string (optional)" }
 ```
 
-Response (contains one-time secret `claim_token`):
+Response (**claim_token is secret; shown once**):
 ```json
 {
-  "rin": "2P232FS",
-  "agent_type": "openclaw",
-  "agent_name": "prod",
+  "rin": "string",
+  "agent_type": "string",
+  "agent_name": "string (optional)",
   "status": "UNCLAIMED",
-  "claim_token": "..."
+  "issued_at": "ISO8601",
+  "claim_token": "string"
 }
 ```
 
-### 6) Claim a RIN (public)
+---
 
-`POST /api/claim`
+### 6) Claim (public)
 
-Body:
+#### `POST /api/claim`
+
+Public endpoint (no agent key).
+
+Request:
 ```json
-{ "rin": "2P232FS", "claimed_by": "alice", "claim_token": "..." }
+{ "rin": "string", "claimed_by": "string", "claim_token": "string" }
 ```
 
-Response:
+Success response:
 ```json
-{ "rin": "2P232FS", "status": "CLAIMED", "claimed_by": "alice" }
+{
+  "rin": "string",
+  "status": "CLAIMED",
+  "claimed_by": "string",
+  "claimed_at": "ISO8601"
+}
 ```
+
+Error semantics (typical):
+- Wrong token → `403`
+- Already claimed → `409`
+- Not found → `404`
+- Missing fields → `400`
 
 ---
 
-## Issuer visibility rules (critical)
+### 7) Issuer public lookup (public)
 
-`GET /api/id/:rin` is public and must expose **only**:
+#### `GET /api/id/:rin`
 
-- `rin`
-- `agent_type`
-- `agent_name`
-- `status`
-- `claimed_by` *(only when claimed)*
+**Public issuer response MUST NOT leak secrets.**
 
-It must **never** include:
-- `api_key`, key hashes, `claim_token`, `issued_at`, or other internal fields.
+✅ Must always include:
+- `rin`, `agent_type`, `agent_name`, `status`
 
----
+✅ When `status == "CLAIMED"` only, may include:
+- `claimed_by`
 
-## E2E verification
-
-Use `scripts/rin-e2e-test.sh` (see README) to validate:
-
-- register agent → `me` (200)
-- rotate → old key 401, new key 200
-- revoke → new key 401
-- `/api/register` without auth → 401
-- claim flow + issuer field constraints
+🚫 Must NEVER include (in any status):
+- `api_key`
+- `claim_token`
+- `issued_at`
+- any internal hash/pepper/secret fields

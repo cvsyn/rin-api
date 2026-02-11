@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# RIN E2E test (public API)
-# - Requires: bash, curl, jq
-# - Never prints: agent api_key, claim_token, rotated api_key
-# - Validates: A/B/C/D flows + issuer field constraints + key lifecycle
+# RIN 1.0.0 — E2E QA script (repo-ready)
 #
-# Usage:
-#   chmod +x scripts/rin-e2e-test.sh
-#   ./scripts/rin-e2e-test.sh
+# HARD RULES:
+# 1) Never print api_key / claim_token (not even partially masked).
+# 2) All HTTP requests must go to https://api.cvsyn.com only.
+# 3) Decide pass/fail primarily by HTTP status codes.
 #
-# Optional:
-#   API_BASE=https://api.cvsyn.com ./scripts/rin-e2e-test.sh
+# Dependencies: bash, curl, jq
 
-API_BASE="${API_BASE:-https://api.cvsyn.com}"
+API_BASE="https://api.cvsyn.com"
 
 AGENT_REGISTER="$API_BASE/api/v1/agents/register"
 AGENT_ME="$API_BASE/api/v1/agents/me"
@@ -26,228 +23,213 @@ RIN_ID="$API_BASE/api/id"
 
 TMP_BODY_FILE="$(mktemp)"
 TMP_STATUS_FILE="$(mktemp)"
-cleanup() { rm -f "$TMP_BODY_FILE" "$TMP_STATUS_FILE"; }
-trap cleanup EXIT
+trap 'rm -f "$TMP_BODY_FILE" "$TMP_STATUS_FILE"' EXIT
 
-# -----------------------------------------------------------------------------
-# Helper: capture JSON body + HTTP status (without printing raw body)
-# -----------------------------------------------------------------------------
 curl_json() {
   local method="$1" url="$2" token="${3-}" data="${4-}"
-  local combined status body
+  local out status body
 
-  if [[ -n "$token" && -n "$data" ]]; then
-    combined="$(curl -sS -X "$method" "$url" \
-      -H "Authorization: Bearer $token" \
-      -H "Content-Type: application/json" \
-      -d "$data" -w $'\n%{http_code}')"
-  elif [[ -n "$token" ]]; then
-    combined="$(curl -sS -X "$method" "$url" \
-      -H "Authorization: Bearer $token" \
-      -w $'\n%{http_code}')"
-  elif [[ -n "$data" ]]; then
-    combined="$(curl -sS -X "$method" "$url" \
-      -H "Content-Type: application/json" \
-      -d "$data" -w $'\n%{http_code}')"
+  if [[ -n "$token" ]]; then
+    if [[ -n "$data" ]]; then
+      out="$(curl -sS -X "$method" "$url" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -d "$data" -w $'\n%{http_code}')"
+    else
+      out="$(curl -sS -X "$method" "$url" \
+        -H "Authorization: Bearer $token" \
+        -w $'\n%{http_code}')"
+    fi
   else
-    combined="$(curl -sS -X "$method" "$url" -w $'\n%{http_code}')"
+    if [[ -n "$data" ]]; then
+      out="$(curl -sS -X "$method" "$url" \
+        -H "Content-Type: application/json" \
+        -d "$data" -w $'\n%{http_code}')"
+    else
+      out="$(curl -sS -X "$method" "$url" -w $'\n%{http_code}')"
+    fi
   fi
 
-  status="${combined##*$'\n'}"
-  body="${combined%$'\n'*}"
+  status="${out##*$'\n'}"
+  body="${out%$'\n'*}"
 
   printf '%s' "$body" >"$TMP_BODY_FILE"
   printf '%s' "$status" >"$TMP_STATUS_FILE"
 }
 
-must_status() {
-  local got="$1" want="$2" label="$3"
-  if [[ "$got" != "$want" ]]; then
-    echo "$label: FAIL(status=$got, expected=$want)" >&2
-    exit 1
-  fi
-}
-
-# =============================================================================
 # A) Agent onboarding
-# =============================================================================
-UNIQ_NAME="rin-test-$(date +%s)-$$"
+UNIQ_NAME="rin-e2e-$(date +%s)-$$"
 
 curl_json POST "$AGENT_REGISTER" "" "$(jq -nc --arg name "$UNIQ_NAME" '{name:$name, description:"e2e"}')"
 BODY="$(cat "$TMP_BODY_FILE")"
 STATUS="$(cat "$TMP_STATUS_FILE")"
-
 if [[ "$STATUS" != "201" && "$STATUS" != "200" ]]; then
   echo "register_agent: FAIL(status=$STATUS)" >&2
   exit 1
 fi
 
-API_KEY="$(echo "$BODY" | jq -r '.agent.api_key // empty')"
+# NOTE: register response key path is .agent.api_key (NOT .api_key)
+API_KEY="$(printf '%s' "$BODY" | jq -r '.agent.api_key // empty')"
 if [[ -z "$API_KEY" ]]; then
-  echo "register_agent: FAIL(no api_key in response)" >&2
+  echo "register_agent: FAIL(no api_key)" >&2
   exit 1
 fi
-
 echo "register_agent: OK"
 
-ME_OLD_STATUS="$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $API_KEY" \
-  "$AGENT_ME")"
+ME_OLD_STATUS="$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $API_KEY" "$AGENT_ME")"
 echo "me(old): $ME_OLD_STATUS"
-must_status "$ME_OLD_STATUS" "200" "me(old)"
+[[ "$ME_OLD_STATUS" == "200" ]] || { echo "me(old) unexpected status" >&2; exit 1; }
 
-# =============================================================================
 # B) Write protection
-# =============================================================================
-curl_json POST "$RIN_REGISTER" "" "$(jq -nc '{agent_type:"test", agent_name:"rin-ab-test"}')"
+curl_json POST "$RIN_REGISTER" "" "$(jq -nc '{agent_type:"test", agent_name:"no-auth"}')"
 STATUS="$(cat "$TMP_STATUS_FILE")"
 echo "register_unauth: $STATUS"
 if [[ "$STATUS" != "401" && "$STATUS" != "403" ]]; then
-  echo "register_unauth: FAIL(status=$STATUS, expected 401/403)" >&2
+  echo "register_unauth unexpected status" >&2
   exit 1
 fi
 
-curl_json POST "$RIN_REGISTER" "$API_KEY" \
-  "$(jq -nc --arg name "$UNIQ_NAME" '{agent_type:"test", agent_name:$name}')"
+curl_json POST "$RIN_REGISTER" "$API_KEY" "$(jq -nc --arg name "$UNIQ_NAME" '{agent_type:"test", agent_name:$name}')"
 BODY="$(cat "$TMP_BODY_FILE")"
 STATUS="$(cat "$TMP_STATUS_FILE")"
 echo "register_auth: $STATUS"
 if [[ "$STATUS" != "201" && "$STATUS" != "200" ]]; then
-  echo "register_auth: FAIL(status=$STATUS)" >&2
+  echo "register_auth unexpected status" >&2
   exit 1
 fi
 
-RIN="$(echo "$BODY" | jq -r '.rin // empty')"
-CLAIM_TOKEN="$(echo "$BODY" | jq -r '.claim_token // empty')"
+RIN="$(printf '%s' "$BODY" | jq -r '.rin // empty')"
+CLAIM_TOKEN="$(printf '%s' "$BODY" | jq -r '.claim_token // empty')"
 if [[ -z "$RIN" || -z "$CLAIM_TOKEN" ]]; then
   echo "register_auth: FAIL(rin/claim_token missing)" >&2
   exit 1
 fi
 
-# =============================================================================
-# C) Claim flow + issuer field constraints
-# =============================================================================
+# C) Claim flow + issuer spec checks
 curl_json GET "$RIN_ID/$RIN" ""
 BODY="$(cat "$TMP_BODY_FILE")"
-STATUS="$(cat "$TMP_STATUS_FILE")"
-STATUS_FIELD="$(echo "$BODY" | jq -r '.status // empty')"
+STATUS_FIELD="$(printf '%s' "$BODY" | jq -r '.status // empty')"
 
 FIELDS_OK_BEFORE=true
-if ! echo "$BODY" | jq -e '.rin and .agent_type and .agent_name and .status' >/dev/null 2>&1; then
+if ! printf '%s' "$BODY" | jq -e '.rin and .agent_type and .agent_name and .status' >/dev/null 2>&1; then
   FIELDS_OK_BEFORE=false
 fi
-if echo "$BODY" | jq -e 'has("api_key") or has("claim_token") or has("issued_at") or has("claimed_by")' >/dev/null 2>&1; then
+if printf '%s' "$BODY" | jq -e 'has("api_key") or has("claim_token") or has("issued_at") or has("claimed_by")' >/dev/null 2>&1; then
   FIELDS_OK_BEFORE=false
 fi
 
 echo -n "id_before_claim: $STATUS_FIELD"
+if [[ "$STATUS_FIELD" != "UNCLAIMED" ]]; then
+  echo " + fields_bad"
+  echo "issuer status_before must be UNCLAIMED" >&2
+  exit 1
+fi
 if [[ "$FIELDS_OK_BEFORE" == true ]]; then
   echo " + fields_ok"
 else
-  echo " + fields_bad" >&2
+  echo " + fields_bad"
+  echo "issuer fields before claim invalid" >&2
   exit 1
 fi
 
 BAD_TOKEN="${CLAIM_TOKEN}x"
 CLAIMER="rin-test-claimer"
 
-curl_json POST "$RIN_CLAIM" "" \
-  "$(jq -nc --arg rin "$RIN" --arg token "$BAD_TOKEN" --arg by "$CLAIMER" \
-    '{rin:$rin, claimed_by:$by, claim_token:$token}')"
+curl_json POST "$RIN_CLAIM" "" "$(jq -nc --arg rin "$RIN" --arg by "$CLAIMER" --arg token "$BAD_TOKEN" '{rin:$rin, claimed_by:$by, claim_token:$token}')"
 STATUS="$(cat "$TMP_STATUS_FILE")"
 echo "claim_wrong: $STATUS"
-if [[ "$STATUS" != "403" && "$STATUS" != "401" && "$STATUS" != "400" ]]; then
-  echo "claim_wrong: FAIL(status=$STATUS, expected 400/401/403)" >&2
+if [[ "$STATUS" != "403" && "$STATUS" != "400" && "$STATUS" != "401" ]]; then
+  echo "claim_wrong unexpected status" >&2
   exit 1
 fi
 
-curl_json POST "$RIN_CLAIM" "" \
-  "$(jq -nc --arg rin "$RIN" --arg token "$CLAIM_TOKEN" --arg by "$CLAIMER" \
-    '{rin:$rin, claimed_by:$by, claim_token:$token}')"
+curl_json POST "$RIN_CLAIM" "" "$(jq -nc --arg rin "$RIN" --arg by "$CLAIMER" --arg token "$CLAIM_TOKEN" '{rin:$rin, claimed_by:$by, claim_token:$token}')"
 STATUS="$(cat "$TMP_STATUS_FILE")"
 echo "claim_ok: $STATUS"
-must_status "$STATUS" "200" "claim_ok"
+[[ "$STATUS" == "200" ]] || { echo "claim_ok unexpected status" >&2; exit 1; }
 
 curl_json GET "$RIN_ID/$RIN" ""
 BODY="$(cat "$TMP_BODY_FILE")"
-STATUS_FIELD="$(echo "$BODY" | jq -r '.status // empty')"
+STATUS_FIELD="$(printf '%s' "$BODY" | jq -r '.status // empty')"
 
 CLAIMED_BY_PRESENT=false
 FIELDS_OK_AFTER=true
 
-if echo "$BODY" | jq -e 'has("claimed_by") and (.claimed_by|type=="string") and (.claimed_by|length>0)' >/dev/null 2>&1; then
+if printf '%s' "$BODY" | jq -e 'has("claimed_by") and (.claimed_by != null) and (.claimed_by|tostring|length > 0)' >/dev/null 2>&1; then
   CLAIMED_BY_PRESENT=true
 fi
-if ! echo "$BODY" | jq -e '.rin and .agent_type and .agent_name and .status' >/dev/null 2>&1; then
+if ! printf '%s' "$BODY" | jq -e '.rin and .agent_type and .agent_name and .status' >/dev/null 2>&1; then
   FIELDS_OK_AFTER=false
 fi
-if echo "$BODY" | jq -e 'has("api_key") or has("claim_token") or has("issued_at")' >/dev/null 2>&1; then
+if printf '%s' "$BODY" | jq -e 'has("api_key") or has("claim_token") or has("issued_at")' >/dev/null 2>&1; then
   FIELDS_OK_AFTER=false
 fi
 
 echo -n "id_after_claim: $STATUS_FIELD"
+if [[ "$STATUS_FIELD" != "CLAIMED" ]]; then
+  echo " + claimed_by_missing + fields_bad"
+  echo "issuer status_after must be CLAIMED" >&2
+  exit 1
+fi
+
 if [[ "$CLAIMED_BY_PRESENT" == true ]]; then
   echo -n " + claimed_by_present"
 else
   echo -n " + claimed_by_missing"
   FIELDS_OK_AFTER=false
 fi
+
 if [[ "$FIELDS_OK_AFTER" == true ]]; then
   echo " + fields_ok"
 else
-  echo " + fields_bad" >&2
+  echo " + fields_bad"
+  echo "issuer fields after claim invalid" >&2
   exit 1
 fi
 
-# =============================================================================
 # D) Key lifecycle (rotate / revoke)
-# =============================================================================
-curl_json POST "$AGENT_ROTATE" "$API_KEY" '{}'
+curl_json POST "$AGENT_ROTATE" "$API_KEY" "{}"
 BODY="$(cat "$TMP_BODY_FILE")"
 STATUS="$(cat "$TMP_STATUS_FILE")"
-must_status "$STATUS" "200" "rotate"
+if [[ "$STATUS" != "200" ]]; then
+  echo "rotate: FAIL(status=$STATUS)" >&2
+  exit 1
+fi
 
-NEW_KEY="$(echo "$BODY" | jq -r '.api_key // empty')"
-ROTATED="$(echo "$BODY" | jq -r '.rotated // empty')"
+NEW_KEY="$(printf '%s' "$BODY" | jq -r '.api_key // empty')"
+ROTATED="$(printf '%s' "$BODY" | jq -r '.rotated // empty')"
 if [[ -z "$NEW_KEY" || "$ROTATED" != "true" ]]; then
-  echo "rotate: FAIL(missing new api_key or rotated!=true)" >&2
+  echo "rotate: FAIL(new_key/rotated)" >&2
   exit 1
 fi
 echo "rotate: OK (newkey captured)"
 
-ME_OLD_AFTER_ROTATE="$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $API_KEY" \
-  "$AGENT_ME")"
-ME_NEW_AFTER_ROTATE="$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $NEW_KEY" \
-  "$AGENT_ME")"
-
+ME_OLD_AFTER_ROTATE="$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $API_KEY" "$AGENT_ME")"
+ME_NEW_AFTER_ROTATE="$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $NEW_KEY" "$AGENT_ME")"
 echo "me(old_after_rotate): $ME_OLD_AFTER_ROTATE"
 echo "me(new_after_rotate): $ME_NEW_AFTER_ROTATE"
 
 if [[ "$ME_OLD_AFTER_ROTATE" != "401" && "$ME_OLD_AFTER_ROTATE" != "403" ]]; then
-  echo "me(old_after_rotate): FAIL(expected 401/403)" >&2
+  echo "old key should be invalid after rotate" >&2
   exit 1
 fi
-must_status "$ME_NEW_AFTER_ROTATE" "200" "me(new_after_rotate)"
+[[ "$ME_NEW_AFTER_ROTATE" == "200" ]] || { echo "new key should be valid after rotate" >&2; exit 1; }
 
-curl_json POST "$AGENT_REVOKE" "$NEW_KEY" '{}'
+curl_json POST "$AGENT_REVOKE" "$NEW_KEY" "{}"
 BODY="$(cat "$TMP_BODY_FILE")"
 STATUS="$(cat "$TMP_STATUS_FILE")"
-must_status "$STATUS" "200" "revoke"
-REVOKED_FLAG="$(echo "$BODY" | jq -r '.revoked // empty')"
+
+REVOKED_FLAG="$(printf '%s' "$BODY" | jq -r '.revoked // empty')"
 echo "revoke: revoked:$REVOKED_FLAG"
-if [[ "$REVOKED_FLAG" != "true" ]]; then
-  echo "revoke: FAIL(expected revoked=true)" >&2
+if [[ "$STATUS" != "200" || "$REVOKED_FLAG" != "true" ]]; then
+  echo "revoke failed" >&2
   exit 1
 fi
 
-ME_NEW_AFTER_REVOKE="$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $NEW_KEY" \
-  "$AGENT_ME")"
+ME_NEW_AFTER_REVOKE="$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $NEW_KEY" "$AGENT_ME")"
 echo "me(new_after_revoke): $ME_NEW_AFTER_REVOKE"
 if [[ "$ME_NEW_AFTER_REVOKE" != "401" && "$ME_NEW_AFTER_REVOKE" != "403" ]]; then
-  echo "me(new_after_revoke): FAIL(expected 401/403)" >&2
+  echo "new key should be invalid after revoke" >&2
   exit 1
 fi
 
