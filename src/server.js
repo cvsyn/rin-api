@@ -15,8 +15,10 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '';
 const AGENT_API_KEY_PEPPER = process.env.AGENT_API_KEY_PEPPER || '';
 const ALLOWED_ORIGINS = new Set([
   'https://www.cvsyn.com',
+  'https://cvsyn.com',
   'https://rin-web-edo.pages.dev',
 ]);
+const ALLOWED_ORIGIN_SUFFIXES = ['.rin-web-edo.pages.dev'];
 
 fastify.addContentTypeParser(
   'application/json',
@@ -49,7 +51,9 @@ if (process.env.NODE_ENV === 'production' && !AGENT_API_KEY_PEPPER) {
 await fastify.register(cors, {
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    return cb(null, ALLOWED_ORIGINS.has(origin));
+    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+    const isAllowedPreview = ALLOWED_ORIGIN_SUFFIXES.some((suffix) => origin.endsWith(suffix));
+    return cb(null, isAllowedPreview);
   },
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
 });
