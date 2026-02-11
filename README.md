@@ -1,181 +1,188 @@
-# RIN API (Node.js + PostgreSQL)
+# RIN API
 
-A minimal identity service for AI/agent IDs (RIN). No auth, no frontend.
+RIN is an issuer-backed identifier system for AI agents.
 
-## Requirements
-- Node.js 20+
-- PostgreSQL running **locally** on the same VM
+Each OpenClaw session (or any AI process) is treated as an **Agent**.
+Agents authenticate using an **Agent API Key**, and can:
 
-## Setup
-1) Create a local PostgreSQL database and user:
+- Register RINs
+- Rotate/revoke their API keys
+- Issue claimable identifiers
+- Verify ownership state publicly
+
+This repository contains the reference implementation of the RIN API.
+
+---
+
+## 🔐 Security Model
+
+- Every write operation requires `Authorization: Bearer <api_key>`.
+- `api_key` is returned **only once** at registration.
+- `claim_token` is returned at RIN issuance and must never be logged or printed.
+- Public issuer endpoint **never exposes sensitive fields**.
+
+Sensitive fields that must NEVER be publicly exposed:
+
+- `api_key`
+- `claim_token`
+- `issued_at`
+- `claimed_at`
+- `revoked_at`
+- internal hashes
+
+---
+
+# 🚀 Quick Start
+
+## 1️⃣ Register an Agent
+
 ```bash
-createdb rin
-createuser rin
-```
+curl -X POST https://api.cvsyn.com/api/v1/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-agent"}'
 
-2) Set env vars (example):
-```bash
-cp .env.example .env
-```
-
-3) Install deps and run migrations:
-```bash
-npm install
-npm run migrate
-```
-
-4) Start the API:
-```bash
-npm start
-```
-
-## Environment variables
-- `PORT` (default `8080`)
-- `HOST` (default `0.0.0.0`)
-- `DB_HOST` (default `127.0.0.1`)
-- `DB_PORT` (default `5432`)
-- `DB_NAME` (default `rin`)
-- `DB_USER` (default `rin`)
-- `DB_PASSWORD` (default `rin`)
-- `RATE_LIMIT_WINDOW_MS` (default `60000`)
-- `RATE_LIMIT_MAX` (default `20`)
-- `CLAIM_TOKEN_PEPPER` (required in production)
-- `ADMIN_KEY` (required in production)
-- `AGENT_API_KEY_PEPPER` (required in production)
-
-## API
-### POST /api/v1/agents/register
-Request body:
-```json
-{ "name": "openclaw", "description": "..." }
-```
 Response:
-```json
-{ "agent": { "name": "openclaw", "description": "...", "api_key": "rin_...", "created_at": "..." }, "important": "SAVE YOUR API KEY!" }
-```
 
-### GET /api/v1/agents/me
-Header:
-```
-Authorization: Bearer <api_key>
-```
-Response:
-```json
-{ "name": "openclaw", "description": "...", "created_at": "...", "last_seen_at": "..." }
-```
-
-### GET /api/v1/agents/status
-Header:
-```
-Authorization: Bearer <api_key>
-```
-Response:
-```json
-{ "status": "active" }
-```
-
-### POST /api/register
-Request body:
-```json
-{ "agent_type": "AI_AGENT", "agent_name": "Optional Name" }
-```
-Response:
-```json
-{ "rin": "X7PK9T", "agent_type": "AI_AGENT", "agent_name": "Optional Name", "status": "UNCLAIMED", "issued_at": "...", "claim_token": "..." }
-```
-
-### POST /api/claim
-Request body:
-```json
-{ "rin": "X7PK9T", "claimed_by": "Acme Labs", "claim_token": "<token>" }
-```
-Response:
-```json
-{ "rin": "X7PK9T", "status": "CLAIMED", "claimed_by": "Acme Labs", "claimed_at": "..." }
-```
-
-### GET /api/id/:rin
-Response:
-```json
-{ "rin": "X7PK9T", "agent_type": "AI_AGENT", "agent_name": "Optional Name", "status": "CLAIMED", "claimed_by": "Acme Labs", "claimed_at": "...", "issued_at": "..." }
-```
-
-### GET /health
-```json
-{ "status": "ok" }
-```
-`GET /health?db=1` runs a DB check and returns `503` with `{ "status":"degraded", "db":"down" }` if the DB is unreachable.
-
-### GET /admin/stats
-Header:
-```
-X-Admin-Key: <ADMIN_KEY>
-```
-Response:
-```json
 {
-  "range_days": 30,
-  "daily": [{ "day": "YYYY-MM-DD", "register_count": 0, "claim_count": 0 }],
-  "totals": { "register_count": 0, "claim_count": 0 }
+  "agent": {
+    "name": "my-agent",
+    "api_key": "rin_xxx",
+    "created_at": "..."
+  },
+  "important": "SAVE YOUR API KEY!"
 }
-```
 
-Example:
-```bash
-curl -sS -H "X-Admin-Key: <key>" https://api.cvsyn.com/admin/stats | jq .
-```
+⚠️ api_key will not be shown again. Store it securely.
 
-## Deployment notes (Oracle Cloud A1 VM)
-- Run PostgreSQL and the API on the same VM.
-- Ensure PostgreSQL only listens on localhost (e.g. `listen_addresses = 'localhost'`).
-- Do not expose port 5432 publicly.
-- Configure env vars with `DB_HOST=127.0.0.1`.
+⸻
 
-## Minimal curl tests
-```bash
-# agent register -> api_key
-AGENT=$(curl -s -X POST http://localhost:8080/api/v1/agents/register \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"openclaw","description":"test agent"}')
+2️⃣ Verify Agent
 
-API_KEY=$(echo "$AGENT" | jq -r .agent.api_key)
+curl https://api.cvsyn.com/api/v1/agents/me \
+  -H "Authorization: Bearer rin_xxx"
 
-# health (lightweight)
-curl -i http://localhost:8080/health
-# health with DB check (503 if DB is down)
-curl -i http://localhost:8080/health?db=1
 
-# register
-REGISTER=$(curl -s -X POST http://localhost:8080/api/register \
-  -H "Authorization: Bearer $API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_type":"AI_AGENT","agent_name":"RIN-Bot"}')
+⸻
 
-RIN=$(echo "$REGISTER" | jq -r .rin)
-TOKEN=$(echo "$REGISTER" | jq -r .claim_token)
+3️⃣ Issue a RIN
 
-# id -> UNCLAIMED
-curl -s http://localhost:8080/api/id/$RIN
+curl -X POST https://api.cvsyn.com/api/register \
+  -H "Authorization: Bearer rin_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_type":"openclaw","agent_name":"prod"}'
 
-# claim with wrong token -> 403
-curl -s -X POST http://localhost:8080/api/claim \
-  -H 'Content-Type: application/json' \
-  -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"wrong\"}"
+Response:
 
-# claim with correct token -> 200
-curl -s -X POST http://localhost:8080/api/claim \
-  -H 'Content-Type: application/json' \
-  -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
+{
+  "rin": "ABC1234",
+  "agent_type": "openclaw",
+  "agent_name": "prod",
+  "status": "UNCLAIMED",
+  "issued_at": "...",
+  "claim_token": "secret-token"
+}
 
-# claim again with same token -> 409 (already claimed)
-curl -s -X POST http://localhost:8080/api/claim \
-  -H 'Content-Type: application/json' \
-  -d "{\"rin\":\"$RIN\",\"claimed_by\":\"Acme Labs\",\"claim_token\":\"$TOKEN\"}"
-```
+⚠️ claim_token must never be logged or printed.
 
-## Daily stats
-Run manually:
-```bash
-npm run stats:daily
-```
-Intended to be scheduled daily via cron/systemd timer on the server.
+⸻
+
+4️⃣ Public Lookup (Issuer Endpoint)
+
+curl https://api.cvsyn.com/api/id/ABC1234
+
+UNCLAIMED response:
+
+{
+  "rin": "ABC1234",
+  "agent_type": "openclaw",
+  "agent_name": "prod",
+  "status": "UNCLAIMED"
+}
+
+CLAIMED response:
+
+{
+  "rin": "ABC1234",
+  "agent_type": "openclaw",
+  "agent_name": "prod",
+  "status": "CLAIMED",
+  "claimed_by": "minijun"
+}
+
+Public endpoint never exposes api_key, claim_token, or internal timestamps.
+
+⸻
+
+5️⃣ Claim Ownership
+
+curl -X POST https://api.cvsyn.com/api/claim \
+  -H "Content-Type: application/json" \
+  -d '{"rin":"ABC1234","claimed_by":"minijun","claim_token":"secret-token"}'
+
+
+⸻
+
+🔄 API Key Lifecycle
+
+Rotate Key
+
+curl -X POST https://api.cvsyn.com/api/v1/agents/rotate-key \
+  -H "Authorization: Bearer rin_old"
+
+Guarantees:
+	•	old key → 401
+	•	new key → 200
+
+⸻
+
+Revoke Key
+
+curl -X POST https://api.cvsyn.com/api/v1/agents/revoke \
+  -H "Authorization: Bearer rin_current"
+
+After revoke:
+	•	key → 401
+
+⸻
+
+🧪 End-to-End Verification
+
+This repository includes a full lifecycle verification script:
+
+scripts/rin-e2e-test.sh
+
+Requirements
+	•	bash
+	•	curl
+	•	jq
+
+Run
+
+chmod +x scripts/rin-e2e-test.sh
+./scripts/rin-e2e-test.sh
+
+The script validates:
+	•	Agent onboarding
+	•	Write authentication enforcement
+	•	Claim flow correctness
+	•	Public issuer field restrictions
+	•	Rotate/revoke lifecycle
+	•	Key invalidation guarantees
+
+Sensitive keys/tokens are never printed.
+
+⸻
+
+🏛 Design Principles
+	•	Minimal surface area
+	•	Explicit lifecycle guarantees
+	•	Strict public field policy
+	•	Stateless verification model
+	•	Agent identity separation
+	•	No secret leakage in issuer responses
+
+⸻
+
+📜 License
+
+MIT
