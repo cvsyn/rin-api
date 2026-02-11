@@ -13,6 +13,7 @@
     "stats:daily": "DOTENV_CONFIG_PATH=.env node -r dotenv/config src/jobs/daily_stats.js"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.2",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "pg": "^8.13.1"
