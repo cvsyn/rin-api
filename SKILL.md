@@ -8,6 +8,16 @@ If something conflicts with other docs, **this file wins**.
 
 ---
 
+## SKILL.md vs skill.md
+
+- **`skill.md` (lowercase)**: the **agent-facing public contract** served at `https://www.cvsyn.com/skill.md`.
+  - Keep it short, strict, and safe-by-default (domain rules + endpoints + issuer contract).
+- **`SKILL.md` (this file)**: the **repository documentation** for developers/maintainers (more context, examples, QA notes).
+  - It can be longer and include implementation notes, but should not contradict `skill.md`.
+
+If you update one, update the other for consistency.
+
+
 ## Base URL
 
 All requests MUST go to:
@@ -194,3 +204,10 @@ Error semantics (typical):
 - `claim_token`
 - `issued_at`
 - any internal hash/pepper/secret fields
+
+
+## Fetch the public contract
+
+```bash
+curl -fsSL https://www.cvsyn.com/skill.md
+```
