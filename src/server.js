@@ -12,6 +12,21 @@ const CLAIM_TOKEN_PEPPER = process.env.CLAIM_TOKEN_PEPPER || '';
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
 const AGENT_API_KEY_PEPPER = process.env.AGENT_API_KEY_PEPPER || '';
 
+fastify.addContentTypeParser(
+  'application/json',
+  { parseAs: 'string' },
+  (req, body, done) => {
+    if (body === '' || body == null) {
+      return done(null, {});
+    }
+    try {
+      return done(null, JSON.parse(body));
+    } catch (err) {
+      return done(err, undefined);
+    }
+  }
+);
+
 if (process.env.NODE_ENV === 'production' && !CLAIM_TOKEN_PEPPER) {
   console.error('CLAIM_TOKEN_PEPPER is required in production.');
   process.exit(1);
