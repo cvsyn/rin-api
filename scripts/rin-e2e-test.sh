@@ -80,6 +80,12 @@ ME_OLD_STATUS="$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Beare
 echo "me(old): $ME_OLD_STATUS"
 [[ "$ME_OLD_STATUS" == "200" ]] || { echo "me(old) unexpected status" >&2; exit 1; }
 
+# A2) Profile update (public-safe)
+PROFILE_PAYLOAD="$(jq -nc '{bio:"short bio", avatar_url:"https://avatars.githubusercontent.com/u/1", links:{github:"https://github.com/example", x:"https://x.com/example"}}')"
+curl_json PATCH "$API_BASE/api/v1/agents/me/profile" "$API_KEY" "$PROFILE_PAYLOAD"
+STATUS="$(cat "$TMP_STATUS_FILE")"
+[[ "$STATUS" == "200" ]] || { echo "profile_update: FAIL(status=$STATUS)" >&2; exit 1; }
+
 # B) Write protection
 curl_json POST "$RIN_REGISTER" "" "$(jq -nc '{agent_type:"test", agent_name:"no-auth"}')"
 STATUS="$(cat "$TMP_STATUS_FILE")"
@@ -115,6 +121,9 @@ if ! printf '%s' "$BODY" | jq -e '.rin and .agent_type and .agent_name and .stat
   FIELDS_OK_BEFORE=false
 fi
 if printf '%s' "$BODY" | jq -e 'has("api_key") or has("claim_token") or has("issued_at") or has("claimed_by")' >/dev/null 2>&1; then
+  FIELDS_OK_BEFORE=false
+fi
+if ! printf '%s' "$BODY" | jq -e '.profile.bio and .profile.avatar_url and .profile.links' >/dev/null 2>&1; then
   FIELDS_OK_BEFORE=false
 fi
 
@@ -162,6 +171,9 @@ if ! printf '%s' "$BODY" | jq -e '.rin and .agent_type and .agent_name and .stat
   FIELDS_OK_AFTER=false
 fi
 if printf '%s' "$BODY" | jq -e 'has("api_key") or has("claim_token") or has("issued_at")' >/dev/null 2>&1; then
+  FIELDS_OK_AFTER=false
+fi
+if ! printf '%s' "$BODY" | jq -e '.profile.bio and .profile.avatar_url and .profile.links' >/dev/null 2>&1; then
   FIELDS_OK_AFTER=false
 fi
 
