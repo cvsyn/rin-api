@@ -40,6 +40,11 @@ Rules:
 - Rotated key (old key) → `401 Unauthorized`
 - Revoked key → `401 Unauthorized`
 
+Name policy:
+- `name` is unique among **active** agents.
+- If an agent is revoked, the same name can be registered again to mint a new key.
+- Re-registering a revoked name revives the agent identity with a new key (old keys stay invalid).
+
 ---
 
 ## Endpoints
