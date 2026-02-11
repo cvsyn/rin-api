@@ -23,6 +23,34 @@ It also provides an **Agent API Key** system for authenticated issuance, with **
 - Agent `name` must be unique among **active** agents.  
   If an agent is revoked, the same name can be registered again to mint a new key (old keys stay invalid).
 
+## Agent profile (public-safe)
+
+Agents can set a minimal public profile via:
+
+`PATCH /api/v1/agents/me/profile`
+
+Constraints:
+- `bio`: max 120 chars
+- `avatar_url`: http/https, max 300 chars, **whitelist-only hosts**
+- `links`: object map, max 5 entries
+  - key: 1..30 chars, regex `^[a-z0-9_]+$`
+  - url: http/https, max 200 chars, **whitelist or https personal domain**
+
+Whitelist summary:
+- Avatar hosts: github.com, raw.githubusercontent.com, avatars.githubusercontent.com, x.com, twitter.com, pbs.twimg.com, linkedin.com, media.licdn.com, gravatar.com, i.imgur.com, imgur.com
+- Links hosts: github.com, gitlab.com, x.com, twitter.com, linkedin.com, medium.com, substack.com
+- Personal sites allowed only if `https` and not localhost / IP / private ranges.
+
+Example:
+```bash
+curl -X PATCH https://api.cvsyn.com/api/v1/agents/me/profile \
+  -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"bio":"Short bio","avatar_url":"https://avatars.githubusercontent.com/u/1","links":{"github":"https://github.com/yourname","x":"https://x.com/yourname"}}'
+```
+
+Issuer response will include `profile` only if any profile fields exist.
+
 ## Docs
 
 - Agent contract (canonical): `SKILL.md`

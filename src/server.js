@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { query } from './db.js';
 import { checkRateLimit } from './rate-limit.js';
 import { generateRin, safeTrim, generateClaimToken, hashClaimToken } from './rin.js';
+import { validateAvatarUrl, validateBio, validateLinks } from './validate.js';
 
 const fastify = Fastify({ logger: false });
 const PORT = Number(process.env.PORT || 8080);
@@ -274,6 +275,70 @@ fastify.post('/api/v1/agents/revoke', async (req, reply) => {
   return reply.send({ revoked: true });
 });
 
+fastify.patch('/api/v1/agents/me/profile', async (req, reply) => {
+  const agent = await requireAgentAuth(req, reply);
+  if (!agent) return;
+
+  const body = req.body ?? {};
+  const updates = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, 'bio')) {
+    const res = validateBio(body.bio);
+    if (!res.ok) return reply.code(400).send({ error: res.error });
+    updates.bio = res.bio;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'avatar_url')) {
+    const res = validateAvatarUrl(body.avatar_url);
+    if (!res.ok) return reply.code(400).send({ error: res.error });
+    updates.avatar_url = res.url;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'links')) {
+    const res = validateLinks(body.links);
+    if (!res.ok) return reply.code(400).send({ error: res.error });
+    updates.links = res.links;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    const current = await query(
+      `SELECT bio, avatar_url, links
+       FROM agents
+       WHERE name = $1`,
+      [agent.name]
+    );
+    const row = current.rows[0] || {};
+
+    await query(
+      `UPDATE agents
+       SET bio = $1,
+           avatar_url = $2,
+           links = $3
+       WHERE name = $4`,
+      [
+        Object.prototype.hasOwnProperty.call(updates, 'bio') ? updates.bio : (row.bio ?? null),
+        Object.prototype.hasOwnProperty.call(updates, 'avatar_url') ? updates.avatar_url : (row.avatar_url ?? null),
+        Object.prototype.hasOwnProperty.call(updates, 'links') ? updates.links : (row.links ?? null),
+        agent.name,
+      ]
+    );
+  }
+
+  const result = await query(
+    `SELECT bio, avatar_url, links
+     FROM agents
+     WHERE name = $1`,
+    [agent.name]
+  );
+
+  const row = result.rows[0] || {};
+  return reply.send({
+    bio: row.bio ?? null,
+    avatar_url: row.avatar_url ?? null,
+    links: row.links ?? null,
+  });
+});
+
 fastify.get('/api/v1/agents/status', async (req, reply) => {
   const agent = await requireAgentAuth(req, reply);
   if (!agent) return;
@@ -419,9 +484,11 @@ fastify.get('/api/id/:rin', async (req, reply) => {
   }
 
   const result = await query(
-    `SELECT rin, agent_type, agent_name, status, claimed_by
-     FROM entities
-     WHERE rin = $1`,
+    `SELECT e.rin, e.agent_type, e.agent_name, e.status, e.claimed_by,
+            a.bio, a.avatar_url, a.links
+     FROM entities e
+     LEFT JOIN agents a ON a.name = e.agent_name
+     WHERE e.rin = $1`,
     [rin]
   );
 
@@ -440,6 +507,12 @@ fastify.get('/api/id/:rin', async (req, reply) => {
   if (row.status === 'CLAIMED') {
     response.claimed_by = row.claimed_by || undefined;
   }
+
+  const profile = {};
+  if (row.bio) profile.bio = row.bio;
+  if (row.avatar_url) profile.avatar_url = row.avatar_url;
+  if (row.links && Object.keys(row.links).length > 0) profile.links = row.links;
+  if (Object.keys(profile).length > 0) response.profile = profile;
 
   return reply.send(response);
 });
