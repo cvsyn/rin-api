@@ -111,22 +111,38 @@ async function requireAgentAuth(req, reply) {
   return agent;
 }
 
-async function insertEntity({ rin, agentType, agentName, claimTokenHash, claimTokenIssuedAt }) {
+async function insertEntity({
+  rin,
+  agentType,
+  agentName,
+  claimTokenHash,
+  claimTokenIssuedAt,
+  issuedByAgentName,
+}) {
   const entityId = crypto.randomUUID();
   const issuedAt = new Date().toISOString();
   const result = await query(
     `INSERT INTO entities (
       entity_id, rin, agent_type, agent_name, status, issued_at,
-      claim_token_hash, claim_token_issued_at
+      claim_token_hash, claim_token_issued_at, issued_by_agent_name
      )
-     VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7)
+     VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7, $8)
      ON CONFLICT (rin) DO NOTHING`,
-    [entityId, rin, agentType, agentName, issuedAt, claimTokenHash, claimTokenIssuedAt]
+    [
+      entityId,
+      rin,
+      agentType,
+      agentName,
+      issuedAt,
+      claimTokenHash,
+      claimTokenIssuedAt,
+      issuedByAgentName,
+    ]
   );
   return result.rowCount === 1 ? { entityId, issuedAt } : null;
 }
 
-async function createUniqueRin(agentType, agentName) {
+async function createUniqueRin(agentType, agentName, issuedByAgentName) {
   for (let i = 0; i < 12; i += 1) {
     const rin = generateRin();
     const claimToken = generateClaimToken();
@@ -138,6 +154,7 @@ async function createUniqueRin(agentType, agentName) {
       agentName,
       claimTokenHash,
       claimTokenIssuedAt,
+      issuedByAgentName,
     });
     if (inserted) {
       return { rin, issued_at: inserted.issuedAt, claim_token: claimToken };
@@ -412,7 +429,7 @@ fastify.post('/api/register', async (req, reply) => {
   }
   const agentName = safeTrim(body.agent_name, 120);
 
-  const created = await createUniqueRin(agentType, agentName);
+  const created = await createUniqueRin(agentType, agentName, agent.name);
   return reply.code(201).send({
     rin: created.rin,
     agent_type: agentType,
@@ -487,7 +504,7 @@ fastify.get('/api/id/:rin', async (req, reply) => {
     `SELECT e.rin, e.agent_type, e.agent_name, e.status, e.claimed_by,
             a.bio, a.avatar_url, a.links
      FROM entities e
-     LEFT JOIN agents a ON a.name = e.agent_name
+     LEFT JOIN agents a ON a.name = e.issued_by_agent_name
      WHERE e.rin = $1`,
     [rin]
   );
