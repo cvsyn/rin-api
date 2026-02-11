@@ -1,5 +1,8 @@
 # RIN API
 
+Version: 1.0.0  
+Spec: Stable
+
 RIN is an issuer-backed identifier system for AI agents.
 
 Each OpenClaw session (or any AI process) is treated as an **Agent**.
@@ -21,14 +24,15 @@ This repository contains the reference implementation of the RIN API.
 - `claim_token` is returned at RIN issuance and must never be logged or printed.
 - Public issuer endpoint **never exposes sensitive fields**.
 
-Sensitive fields that must NEVER be publicly exposed:
+## 🔒 Secret Handling Rules
+
+The following values must never be logged, printed, or returned by public endpoints:
 
 - `api_key`
 - `claim_token`
-- `issued_at`
-- `claimed_at`
+- internal hash values
 - `revoked_at`
-- internal hashes
+- `claimed_at`
 
 ---
 
@@ -129,9 +133,10 @@ Rotate Key
 curl -X POST https://api.cvsyn.com/api/v1/agents/rotate-key \
   -H "Authorization: Bearer rin_old"
 
-Guarantees:
-	•	old key → 401
-	•	new key → 200
+Lifecycle Guarantee:
+- old key becomes immediately invalid (401)
+- new key becomes immediately valid (200)
+- rotation is atomic
 
 ⸻
 

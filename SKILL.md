@@ -32,6 +32,7 @@ Request:
 { "name": "string", "description"?: "string" }
 
 Response:
+201 Created
 
 {
   "agent": {
@@ -70,6 +71,7 @@ POST /api/v1/agents/rotate-key
 Auth required.
 
 Response:
+200 OK
 
 {
   "api_key": "string",
@@ -88,6 +90,7 @@ POST /api/v1/agents/revoke
 Auth required.
 
 Response:
+200 OK
 
 {
   "revoked": true
@@ -144,6 +147,8 @@ Responses:
 
 Status	Meaning
 200	Claim successful
+400	Missing required fields
+401	Authentication error (if future auth added)
 403	Invalid claim token
 409	Already claimed
 404	RIN not found
