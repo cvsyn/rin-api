@@ -233,4 +233,23 @@ if [[ "$ME_NEW_AFTER_REVOKE" != "401" && "$ME_NEW_AFTER_REVOKE" != "403" ]]; the
   exit 1
 fi
 
+# E) Re-register revoked name (revive)
+curl_json POST "$AGENT_REGISTER" "" "$(jq -nc --arg name "$UNIQ_NAME" '{name:$name, description:"re-registered"}')"
+BODY="$(cat "$TMP_BODY_FILE")"
+STATUS="$(cat "$TMP_STATUS_FILE")"
+if [[ "$STATUS" != "201" && "$STATUS" != "200" ]]; then
+  echo "reregister: FAIL(status=$STATUS)" >&2
+  exit 1
+fi
+
+REVIVED_KEY="$(printf '%s' "$BODY" | jq -r '.agent.api_key // empty')"
+if [[ -z "$REVIVED_KEY" ]]; then
+  echo "reregister: FAIL(no api_key)" >&2
+  exit 1
+fi
+
+ME_REVIVED_STATUS="$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $REVIVED_KEY" "$AGENT_ME")"
+echo "me(revived): $ME_REVIVED_STATUS"
+[[ "$ME_REVIVED_STATUS" == "200" ]] || { echo "revived key should be 200" >&2; exit 1; }
+
 echo "DONE ✅"
