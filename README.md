@@ -1,5 +1,14 @@
 # rin-api
 
+
+## Agent contract (skill.md)
+
+For automated agents, the canonical skill/contract is published at:
+
+- `https://www.cvsyn.com/skill.md`
+
+This file is the "single source of truth" for how agents should call the API safely (domains, endpoints, secret-handling rules, and issuer contract).
+
 RIN API issues short identifiers (**RINs**) and supports a secure claim flow.
 It also provides an **Agent API Key** system for authenticated issuance, with **rotate** and **revoke** lifecycle controls.
 
