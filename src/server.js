@@ -12,13 +12,18 @@ const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
 const CLAIM_TOKEN_PEPPER = process.env.CLAIM_TOKEN_PEPPER || '';
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
+const ADMIN_IP_ALLOWLIST = process.env.ADMIN_IP_ALLOWLIST || '';
 const AGENT_API_KEY_PEPPER = process.env.AGENT_API_KEY_PEPPER || '';
 const ALLOWED_ORIGINS = new Set([
   'https://www.cvsyn.com',
   'https://cvsyn.com',
   'https://rin-web-edo.pages.dev',
 ]);
-const ALLOWED_ORIGIN_SUFFIXES = ['.rin-web-edo.pages.dev'];
+const ADMIN_IPS = new Set(
+  ADMIN_IP_ALLOWLIST.split(',')
+    .map((ip) => ip.trim())
+    .filter(Boolean)
+);
 
 fastify.addContentTypeParser(
   'application/json',
@@ -51,9 +56,7 @@ if (process.env.NODE_ENV === 'production' && !AGENT_API_KEY_PEPPER) {
 await fastify.register(cors, {
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-    const isAllowedPreview = ALLOWED_ORIGIN_SUFFIXES.some((suffix) => origin.endsWith(suffix));
-    return cb(null, isAllowedPreview);
+    return cb(null, ALLOWED_ORIGINS.has(origin));
   },
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
 });
@@ -391,6 +394,12 @@ fastify.get('/admin/stats', async (req, reply) => {
   if (!ADMIN_KEY || !provided || String(provided) !== ADMIN_KEY) {
     return reply.code(401).send({ error: 'Unauthorized' });
   }
+  if (ADMIN_IPS.size > 0) {
+    const ip = getClientIp(req);
+    if (!ADMIN_IPS.has(ip)) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+  }
 
   const dailyResult = await query(
     `SELECT day, register_count, claim_count
@@ -461,6 +470,12 @@ fastify.post('/api/register', async (req, reply) => {
 });
 
 fastify.post('/api/claim', async (req, reply) => {
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    return reply.code(429).send({ error: 'Too many requests' });
+  }
+
   const body = req.body || {};
   const rin = safeTrim(body.rin, 16);
   const claimedBy = safeTrim(body.claimed_by, 160);
