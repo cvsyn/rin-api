@@ -18,7 +18,6 @@ const ALLOWED_ORIGINS = new Set([
   'https://cvsyn.com',
   'https://rin-web-edo.pages.dev',
 ]);
-const ALLOWED_ORIGIN_SUFFIXES = ['.rin-web-edo.pages.dev'];
 
 fastify.addContentTypeParser(
   'application/json',
@@ -51,9 +50,7 @@ if (process.env.NODE_ENV === 'production' && !AGENT_API_KEY_PEPPER) {
 await fastify.register(cors, {
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-    const isAllowedPreview = ALLOWED_ORIGIN_SUFFIXES.some((suffix) => origin.endsWith(suffix));
-    return cb(null, isAllowedPreview);
+    return cb(null, ALLOWED_ORIGINS.has(origin));
   },
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
 });
@@ -461,6 +458,12 @@ fastify.post('/api/register', async (req, reply) => {
 });
 
 fastify.post('/api/claim', async (req, reply) => {
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    return reply.code(429).send({ error: 'Too many requests' });
+  }
+
   const body = req.body || {};
   const rin = safeTrim(body.rin, 16);
   const claimedBy = safeTrim(body.claimed_by, 160);
