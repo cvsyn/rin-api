@@ -12,18 +12,12 @@ const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
 const CLAIM_TOKEN_PEPPER = process.env.CLAIM_TOKEN_PEPPER || '';
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
-const ADMIN_IP_ALLOWLIST = process.env.ADMIN_IP_ALLOWLIST || '';
 const AGENT_API_KEY_PEPPER = process.env.AGENT_API_KEY_PEPPER || '';
 const ALLOWED_ORIGINS = new Set([
   'https://www.cvsyn.com',
   'https://cvsyn.com',
   'https://rin-web-edo.pages.dev',
 ]);
-const ADMIN_IPS = new Set(
-  ADMIN_IP_ALLOWLIST.split(',')
-    .map((ip) => ip.trim())
-    .filter(Boolean)
-);
 
 fastify.addContentTypeParser(
   'application/json',
@@ -393,12 +387,6 @@ fastify.get('/admin/stats', async (req, reply) => {
   const provided = req.headers['x-admin-key'];
   if (!ADMIN_KEY || !provided || String(provided) !== ADMIN_KEY) {
     return reply.code(401).send({ error: 'Unauthorized' });
-  }
-  if (ADMIN_IPS.size > 0) {
-    const ip = getClientIp(req);
-    if (!ADMIN_IPS.has(ip)) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
   }
 
   const dailyResult = await query(
